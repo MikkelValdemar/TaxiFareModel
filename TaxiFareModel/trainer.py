@@ -3,6 +3,7 @@ import numpy as np
 
 # sklearn
 from sklearn.linear_model import LinearRegression
+from sklearn.svm import SVR
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler
@@ -17,11 +18,11 @@ from memoized_property import memoized_property
 import mlflow
 from mlflow.tracking import MlflowClient
 
-from ml_flow_test import EXPERIMENT_NAME
+import joblib
 
 class Trainer():
 
-    def __init__(self, X, y, exp_name):
+    def __init__(self, X, y, exp_name, model):
         """
             X: pandas DataFrame
             y: pandas Series
@@ -30,6 +31,7 @@ class Trainer():
         self.X = X
         self.y = y
         self.experiment_name = exp_name
+        self.model = model
 
     def set_pipeline(self):
         """defines the pipeline as a class attribute"""
@@ -43,7 +45,7 @@ class Trainer():
 
         self.pipe = Pipeline([
             ('preproc', pipe_preproc),
-            ('linear_model', LinearRegression())
+            ('linear_model', self.model)
         ])
 
     def run(self):
@@ -55,9 +57,14 @@ class Trainer():
         """evaluates the pipeline on df_test and return the RMSE"""
         y_pred = self.pipe.predict(X_test)
         rmse = np.sqrt(((y_pred - y_test)**2).mean())
-        self.mlflow_log_param("model", "linear")
-        self.mlflow_log_metric("rmse", rmse)
+        self.rmse = rmse
         return rmse
+
+    def save_model(self, model_name):
+        """ Save the trained model into a model.joblib file """
+        joblib.dump(self.pipe, f"models/{model_name}.joblib")
+        self.mlflow_log_param("model", model_name)
+        self.mlflow_log_metric("rmse", self.rmse)
 
     @memoized_property
     def mlflow_client(self):
@@ -93,11 +100,15 @@ if __name__ == "__main__":
     X = df.drop("fare_amount", axis=1)
     # hold out
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.15)
-    print(X_train)
     # train
-    exp_name = "[DE] [Berlin] [MikkelValdemar] taxifare + 0"
-    trainer = Trainer(X_train, y_train, exp_name)
-    trainer.run()
-    # evaluate
-    rmse = trainer.evaluate(X_val, y_val)
-    print(rmse)
+    exp_name = "[DE] [Berlin] [MikkelValdemar] taxifare + 1"
+    model_list = [LinearRegression(), SVR()]
+    model_name_list = ['LinearReg', "SVM"]
+    for model, model_name in zip(model_list, model_name_list):
+        trainer = Trainer(X_train, y_train, exp_name, model)
+        trainer.run()
+        # evaluate
+        rmse = trainer.evaluate(X_val, y_val)
+        print(rmse)
+    # save model
+        trainer.save_model(model_name)
